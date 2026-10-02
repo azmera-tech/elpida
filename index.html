@@ -5340,51 +5340,75 @@ window.addEventListener('scroll',function(){var btn=document.getElementById('bac
     if(mode==='reset') document.getElementById('ea-do-reset').onclick=resetPassword;
   }
   function msg(text,type){ var m=document.getElementById('elpida-auth-msg'); if(!m) return; m.innerHTML='<div style="border:1px solid '+(type==='error'?'rgba(239,68,68,.35)':'rgba(34,197,94,.35)')+';background:'+(type==='error'?'rgba(239,68,68,.09)':'rgba(34,197,94,.09)')+';color:'+(type==='error'?'#ef4444':'#22c55e')+';border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px;line-height:1.5">'+esc(text)+'</div>'; }
+  // Security hardening: disable the submit button for the duration of the request on every auth
+  // action, restoring its original label when done — prevents a double-click from firing two
+  // concurrent signInWithPassword/signUp/resetPasswordForEmail/updateUser calls.
+  async function withAuthBtn(id, label, fn){
+    var btn=document.getElementById(id);
+    if(btn){ btn.disabled=true; btn.textContent='Please wait…'; }
+    try{ await fn(); }
+    finally{ if(btn){ btn.disabled=false; btn.textContent=label; } }
+  }
   async function login(){
     var s=supa(), email=(document.getElementById('ea-email').value||'').trim().toLowerCase(), pass=document.getElementById('ea-pass').value;
     if(!s){ msg('The backend is not connected. Please configure Supabase before login.','error'); return; }
     if(!emailOk(email)){ msg('Please enter a valid email address.','error'); return; }
     if(!pass){ msg('Password is required.','error'); return; }
-    var r=await s.auth.signInWithPassword({email:email,password:pass});
-    if(r.error){ msg('Login failed. Please check your email and password.','error'); return; }
-    CURRENT_USER=r.data.user; closeAuth(); refreshNav(); toast('Welcome back to ELPIDA.','success');
+    await withAuthBtn('ea-do-login','Login',async function(){
+      var r=await s.auth.signInWithPassword({email:email,password:pass});
+      if(r.error){ msg('Login failed. Please check your email and password.','error'); return; }
+      CURRENT_USER=r.data.user; closeAuth(); refreshNav(); toast('Welcome back to ELPIDA.','success');
+    });
   }
   async function signup(){
     var s=supa(), name=(document.getElementById('ea-name').value||'').trim(), email=(document.getElementById('ea-email').value||'').trim().toLowerCase(), pass=document.getElementById('ea-pass').value, pass2=document.getElementById('ea-pass2').value;
     if(!s){ msg('The backend is not connected. Please configure Supabase before signup.','error'); return; }
     if(name.length<2){ msg('Please enter your full name.','error'); return; }
     if(!emailOk(email)){ msg('Invalid email format. Please enter a real email address.','error'); return; }
-    var del=await emailDeliverable(email);
-    if(!del.ok){ msg(del.suggest?('We couldn\'t find this email. Did you mean '+del.suggest+'? Please enter a valid email or create one.'):'We couldn\'t find this email — please use a valid email address (Gmail, Yahoo, Outlook…) or create one.','error'); return; }
-    if(await emailExists(email)){ msg('An account already exists for this email. Please login or reset your password.','error'); return; }
     if(pass.length<8){ msg('Password must be at least 8 characters.','error'); return; }
     if(pass!==pass2){ msg('Passwords do not match.','error'); return; }
-    var r=await s.auth.signUp({email:email,password:pass,options:{data:{full_name:name},emailRedirectTo:location.href.split('#')[0]}});
-    if(r.error){ msg(r.error.message||'Registration failed.','error'); return; }
-    if(r.data&&r.data.user&&r.data.user.identities&&r.data.user.identities.length===0){ msg('An account already exists for this email. Please login or reset your password.','error'); return; }
-    // Security hardening: role is intentionally NOT sent here. A privilege field must never be
-    // client-writable, even to a harmless-looking default — see the required SQL (profiles.role
-    // DEFAULT 'user' + a trigger blocking non-admin role changes) documented in the security report.
-    try{ await s.from('profiles').upsert({id:r.data.user&&r.data.user.id,email:email,full_name:name}); }catch(_e){}
-    msg('Account created. Please check your email if confirmation is required, then login.','success');
+    await withAuthBtn('ea-do-signup','Create Account',async function(){
+      var del=await emailDeliverable(email);
+      if(!del.ok){ msg(del.suggest?('We couldn\'t find this email. Did you mean '+del.suggest+'? Please enter a valid email or create one.'):'We couldn\'t find this email — please use a valid email address (Gmail, Yahoo, Outlook…) or create one.','error'); return; }
+      if(await emailExists(email)){ msg('An account already exists for this email. Please login or reset your password.','error'); return; }
+      var r=await s.auth.signUp({email:email,password:pass,options:{data:{full_name:name},emailRedirectTo:location.href.split('#')[0]}});
+      if(r.error){ msg(r.error.message||'Registration failed.','error'); return; }
+      if(r.data&&r.data.user&&r.data.user.identities&&r.data.user.identities.length===0){ msg('An account already exists for this email. Please login or reset your password.','error'); return; }
+      // Security hardening: role is intentionally NOT sent here. A privilege field must never be
+      // client-writable, even to a harmless-looking default — see the required SQL (profiles.role
+      // DEFAULT 'user' + a trigger blocking non-admin role changes) documented in the security report.
+      try{ await s.from('profiles').upsert({id:r.data.user&&r.data.user.id,email:email,full_name:name}); }catch(_e){}
+      msg('Account created. Please check your email if confirmation is required, then login.','success');
+    });
   }
   async function forgot(){
     var s=supa(), email=(document.getElementById('ea-email').value||'').trim().toLowerCase();
     if(!s){ msg('The backend is not connected.','error'); return; }
     if(!emailOk(email)){ msg('Please enter a valid email address.','error'); return; }
-    if(!await emailExists(email)){ msg('No account exists for that email address. Please check the email or sign up.','error'); return; }
-    var r=await s.auth.resetPasswordForEmail(email,{redirectTo:location.href.split('#')[0]});
-    if(r.error){ msg(r.error.message||'Could not send reset link.','error'); return; }
-    msg('A secure password reset link has been sent to your email.','success');
+    await withAuthBtn('ea-do-forgot','Send Reset Link',async function(){
+      // Security hardening: never reveal whether an account exists for this email — this used to
+      // call emailExists() first and show a distinct "no account exists" error, which let anyone
+      // enumerate registered emails through the forgot-password form. Supabase's own
+      // resetPasswordForEmail already returns success regardless of whether the email is
+      // registered, so the fix is simply to stop short-circuiting on our own existence check and
+      // always show the same message; only a genuine failure (rate limit, network, backend down)
+      // is surfaced as an error.
+      var r=await s.auth.resetPasswordForEmail(email,{redirectTo:location.href.split('#')[0]});
+      if(r.error){ msg(r.error.message||'Could not send reset link. Please try again shortly.','error'); return; }
+      msg('If an account exists for that email, a secure password reset link has been sent.','success');
+    });
   }
   async function resetPassword(){
-    var s=supa(), p=document.getElementById('ea-pass').value, p2=document.getElementById('ea-pass2').value;
+    var p=document.getElementById('ea-pass').value, p2=document.getElementById('ea-pass2').value;
     if(p.length<8){ msg('Password must be at least 8 characters.','error'); return; }
     if(p!==p2){ msg('Passwords do not match.','error'); return; }
-    var r=await s.auth.updateUser({password:p});
-    if(r.error){ msg(r.error.message||'Could not update password.','error'); return; }
-    msg('Password updated successfully. You may now continue using your account.','success');
-    setTimeout(function(){ closeAuth(); history.replaceState(null,'',location.pathname+location.search); },1200);
+    await withAuthBtn('ea-do-reset','Update Password',async function(){
+      var s=supa();
+      var r=await s.auth.updateUser({password:p});
+      if(r.error){ msg(r.error.message||'Could not update password.','error'); return; }
+      msg('Password updated successfully. You may now continue using your account.','success');
+      setTimeout(function(){ closeAuth(); history.replaceState(null,'',location.pathname+location.search); },1200);
+    });
   }
   async function logout(){ var s=supa(); if(s) await s.auth.signOut(); CURRENT_USER=null; refreshNav(); toast('You have been logged out.','success'); }
   async function refreshNav(){
