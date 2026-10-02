@@ -2474,6 +2474,20 @@ window.addEventListener('scroll',function(){var btn=document.getElementById('bac
   function supa(){ return window._elpidaSupa ? window._elpidaSupa() : null; }
   function escp(s){ if(s===null||s===undefined) return ''; var d=document.createElement('div'); d.textContent=String(s); return d.innerHTML; }
 
+  // Security hardening: these URL fields (sermons.watch_url/audio_url, library.download_url) are
+  // plain admin-entered strings in the database — nothing stops a "javascript:" or "data:" scheme
+  // from being stored. Reject any scheme outside the allow-list before the value is ever turned
+  // into something openable; a bare/relative URL (no scheme) passes through unchanged. Exposed on
+  // window since it's also used from the account/checkout code in a different script scope.
+  window.elpidaSafeUrl = function(u, allowed){
+    if(!u) return '';
+    u = String(u).trim();
+    if(!u) return '';
+    var m = u.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/);
+    if(m && (allowed || ['http','https']).indexOf(m[1].toLowerCase()) < 0) return '';
+    return u;
+  };
+
   /* ── Override form handlers to save to Supabase ─────────────── */
 
   // CONTACT
@@ -2581,10 +2595,10 @@ window.addEventListener('scroll',function(){var btn=document.getElementById('bac
     // Build Watch button based on content type & available URLs
     var watchBtn = '';
     if(ct==='video'||s.youtube_id||s.watch_url){
-      var watchHref = s.watch_url || (s.youtube_id?'https://www.youtube.com/watch?v='+escp(s.youtube_id):'#');
+      var watchHref = window.elpidaSafeUrl(s.watch_url) || (s.youtube_id?'https://www.youtube.com/watch?v='+escp(s.youtube_id):'#');
       watchBtn = '<button class="sc-btn" onclick="window.open(\''+watchHref.replace(/'/g,"%27")+'\',\'_blank\',\'noopener\')">'+watchLabel+'</button>';
     } else if(ct==='pdf'||ct==='article'){
-      var linkUrl = s.watch_url||s.audio_url||'#';
+      var linkUrl = window.elpidaSafeUrl(s.watch_url)||window.elpidaSafeUrl(s.audio_url)||'#';
       watchBtn = '<button class="sc-btn" onclick="window.open(\''+linkUrl.replace(/'/g,"%27")+'\',\'_blank\',\'noopener\')">'+(ct==='pdf'?'📄 Read':'🔗 Read')+'</button>';
     } else {
       watchBtn = '<button class="sc-btn" onclick="openYT(\''+escp(s.title).replace(/'/g,'')+'\')">'+watchLabel+'</button>';
@@ -5508,10 +5522,10 @@ window.addEventListener('scroll',function(){var btn=document.getElementById('bac
   async function startBookCheckout(key){
     var b=window._elpidaProducts&&window._elpidaProducts[key]; if(!b){ toast('This resource is unavailable.','error'); return; }
     var paid=(b.access_type==='paid'||Number(b.price)>0);
-    if(!paid){ if(b.download_url) window.open(b.download_url,'_blank','noopener'); else toast('This free resource will be available for download soon.',''); return; }
+    if(!paid){ var safeDl0=window.elpidaSafeUrl(b.download_url); if(safeDl0) window.open(safeDl0,'_blank','noopener'); else toast('This free resource will be available for download soon.',''); return; }
     if(!CURRENT_USER){ showAuth('login'); toast('Please login before purchasing a book.',''); return; }
     var existing=await hasApprovedPurchase(b.id);
-    if(existing){ if(b.download_url) window.open(b.download_url,'_blank','noopener'); else toast('Your purchase is approved. The download file is not attached yet.','success'); return; }
+    if(existing){ var safeDl1=window.elpidaSafeUrl(b.download_url); if(safeDl1) window.open(safeDl1,'_blank','noopener'); else toast('Your purchase is approved. The download file is not attached yet.','success'); return; }
     showCheckout('book',b);
   }
   async function startTrainingEnrollment(key){
