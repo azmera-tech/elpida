@@ -3465,6 +3465,7 @@ window.addEventListener('scroll',function(){var btn=document.getElementById('bac
             <div class="ea-nav-item" data-sec="certificates"><span class="ea-ic">🏅</span> Certificates</div>
             <div class="ea-nav-label">System</div>
             <div class="ea-nav-item" data-sec="settings"><span class="ea-ic">⚙️</span> Settings</div>
+            <div class="ea-nav-item" data-sec="password"><span class="ea-ic">🔑</span> Password Change</div>
           </div>
           <div class="ea-foot">
             <div class="ea-user"><div class="ea-av" id="ea-av">A</div><div><div class="ea-un" id="ea-un">Admin</div><div class="ea-ur">Administrator</div></div></div>
@@ -3589,14 +3590,14 @@ window.addEventListener('scroll',function(){var btn=document.getElementById('bac
   }
 
   // ── Navigation ──────────────────────────────────────────────
-  var TITLES={dashboard:'Dashboard',sermons:'Teachings',media:'Media Library',events:'Events',library:'Library Resources',training:'Training Programs',enrollments:'Student Enrollments',messages:'Messages',prayers:'Prayer Requests',subscribers:'Subscribers',broadcasts:'Broadcast History',donations:'Donations',purchases:'Purchases',certificates:'Certificates',settings:'Settings'};
+  var TITLES={dashboard:'Dashboard',sermons:'Teachings',media:'Media Library',events:'Events',library:'Library Resources',training:'Training Programs',enrollments:'Student Enrollments',messages:'Messages',prayers:'Prayer Requests',subscribers:'Subscribers',broadcasts:'Broadcast History',donations:'Donations',purchases:'Purchases',certificates:'Certificates',settings:'Settings',password:'Password Change'};
   function navigate(sec){
     SECTION=sec;
     document.querySelectorAll('.ea-nav-item').forEach(function(n){ n.classList.toggle('act',n.dataset.sec===sec); });
     $('ea-title').textContent=TITLES[sec]||sec;
     $('ea-top-actions').innerHTML='';
     $('ea-content').innerHTML='<div class="ea-spin"></div>';
-    var R={dashboard:renderDashboard,institute:renderInstitute,sermons:renderSermons,media:renderMedia,events:renderEvents,library:renderLibrary,training:renderTraining,enrollments:renderEnrollments,faculty:renderFaculty,messages:renderMessages,prayers:renderPrayers,subscribers:renderSubscribers,broadcasts:renderBroadcasts,donations:renderDonations,purchases:renderPurchases,certificates:renderCertificates,settings:renderSettings};
+    var R={dashboard:renderDashboard,institute:renderInstitute,sermons:renderSermons,media:renderMedia,events:renderEvents,library:renderLibrary,training:renderTraining,enrollments:renderEnrollments,faculty:renderFaculty,messages:renderMessages,prayers:renderPrayers,subscribers:renderSubscribers,broadcasts:renderBroadcasts,donations:renderDonations,purchases:renderPurchases,certificates:renderCertificates,settings:renderSettings,password:renderPasswordChange};
     (R[sec]||function(){ $('ea-content').innerHTML='<div class="ea-apierr">Unknown section.</div>'; })();
   }
   function setActions(htmlStr){ $('ea-top-actions').innerHTML=htmlStr; }
@@ -5094,6 +5095,79 @@ window.addEventListener('scroll',function(){var btn=document.getElementById('bac
     if(ok>0) toast(ok+' certificate'+(ok===1?'':'s')+' issued.','success');
   }
 
+  // ── PASSWORD CHANGE (New Section) ──────────────────────────────
+  // Dedicated admin-only tab, reusing the existing ea-shead/ea-settings/ea-sset/ea-fg/ea-input
+  // styling and the toast() notification system already used throughout this panel. Current
+  // password is verified by re-authenticating via signInWithPassword before calling
+  // updateUser() — the standard Supabase Auth approach for "confirm it's really you"; there is
+  // no separate verify-password endpoint, and re-signing in the same user refreshes the
+  // session rather than invalidating it, so the admin is never unexpectedly logged out.
+  function pwField(label,id,autocomplete){
+    return '<div class="ea-fg"><label class="ea-tog-l">'+label+'</label>'
+      +'<div style="position:relative">'
+      +'<input id="'+id+'" class="ea-input" type="password" autocomplete="'+autocomplete+'" style="padding-right:42px">'
+      +'<button type="button" class="pw-eye-btn" data-target="'+id+'" aria-label="Show password" aria-pressed="false" style="position:absolute;right:5px;top:50%;transform:translateY(-50%);width:30px;height:30px;border-radius:7px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);color:#9a9aaa;font-size:13px;display:flex;align-items:center;justify-content:center;cursor:pointer">👁</button>'
+      +'</div></div>';
+  }
+  function pwRawVal(id){ var e=$(id); return e?e.value:''; } // never trim a password — a trailing/leading space is part of it
+  function pwMsg(text,isError){
+    var box=$('pw-inline-msg'); if(!box) return;
+    if(!text){ box.style.display='none'; box.textContent=''; return; }
+    box.style.cssText='display:block;margin-top:14px;border:1px solid '+(isError?'rgba(239,68,68,.35)':'rgba(34,197,94,.35)')+';background:'+(isError?'rgba(239,68,68,.09)':'rgba(34,197,94,.09)')+';color:'+(isError?'#ef4444':'#22c55e')+';border-radius:10px;padding:10px 12px;font-size:12.5px;line-height:1.5';
+    box.textContent=text;
+  }
+  function renderPasswordChange(){
+    setActions('');
+    $('ea-content').innerHTML=
+      '<div class="ea-shead"><h2>Password Change</h2><p>Change your own admin account password. Your current password is required to confirm it\'s really you.</p></div>'
+      +'<div class="ea-settings"><div class="ea-sset" style="max-width:440px">'
+        +'<h3>🔑 Change Your Password</h3>'
+        +pwField('Current Password','pw-current','current-password')
+        +pwField('New Password','pw-new','new-password')
+        +pwField('Confirm New Password','pw-confirm','new-password')
+        +'<div style="font-size:11px;color:#8a8a9a;margin:-2px 0 14px;line-height:1.5">Minimum 8 characters. Must be different from your current password.</div>'
+        +'<button class="ea-tbtn primary" id="pw-submit" style="width:100%">Change Password</button>'
+        +'<div id="pw-inline-msg" style="display:none"></div>'
+      +'</div></div>';
+    $('ea-content').querySelectorAll('.pw-eye-btn').forEach(function(btn){
+      btn.onclick=function(){
+        var inp=$(btn.dataset.target); if(!inp) return;
+        var showing=inp.type==='text';
+        inp.type=showing?'password':'text';
+        btn.setAttribute('aria-pressed', showing?'false':'true');
+        btn.setAttribute('aria-label', (showing?'Show':'Hide')+' password');
+        btn.textContent=showing?'👁':'🙈';
+      };
+    });
+    $('pw-submit').onclick=submitPasswordChange;
+  }
+  async function submitPasswordChange(){
+    pwMsg('');
+    var current=pwRawVal('pw-current'), next=pwRawVal('pw-new'), confirm=pwRawVal('pw-confirm');
+    if(!current||!next||!confirm){ pwMsg('All fields are required.',true); return; }
+    if(next.length<8){ pwMsg('New password must be at least 8 characters.',true); return; }
+    if(next!==confirm){ pwMsg('New password and confirmation do not match.',true); return; }
+    if(next===current){ pwMsg('New password must be different from your current password.',true); return; }
+    if(!USER||!USER.email){ pwMsg('Your session could not be verified. Please sign out and sign back in.',true); return; }
+    var btn=$('pw-submit');
+    if(btn){ btn.disabled=true; btn.textContent='Changing…'; }
+    try{
+      var s=getSupa();
+      var verify=await s.auth.signInWithPassword({email:USER.email,password:current});
+      if(verify.error){ pwMsg('Current password is incorrect.',true); return; }
+      if(!(await isCurrentUserAdmin())){ pwMsg('Admin access required.',true); return; }
+      var r=await s.auth.updateUser({password:next});
+      if(r.error){ pwMsg(r.error.message||'Could not update password.',true); return; }
+      $('pw-current').value=''; $('pw-new').value=''; $('pw-confirm').value='';
+      toast('Password updated.','success');
+      pwMsg('Your password has been changed successfully.',false);
+    }catch(e){
+      pwMsg((e&&e.message)||'Could not update password.',true);
+    }finally{
+      if(btn){ btn.disabled=false; btn.textContent='Change Password'; }
+    }
+  }
+
   // ── SETTINGS ────────────────────────────────────────────────
   async function renderSettings(){
     setActions('<button class="ea-tbtn primary" id="ea-save-set">Save Settings</button>');
@@ -5119,13 +5193,13 @@ window.addEventListener('scroll',function(){var btn=document.getElementById('bac
             <div class="ea-fg"><label class="ea-tog-l">TikTok URL</label><input id="ea-set-tt" class="ea-input" value="${esc(s.tiktok_url||'')}"></div>
           </div>
           <div class="ea-sset"><h3>🔐 Account</h3>
-            <div class="ea-fg"><label class="ea-tog-l">New Password</label><input id="ea-set-pw" class="ea-input" type="password" placeholder="New password (min 6 chars)"></div>
-            <button class="ea-tbtn ghost" id="ea-change-pw" style="width:100%;margin-top:6px">Change Password</button>
+            <div style="font-size:12.5px;color:#9a9aaa;line-height:1.6;margin-bottom:10px">Use the dedicated <b style="color:#c9a052">Password Change</b> page to change your password — it verifies your current password first.</div>
+            <button class="ea-tbtn ghost" id="ea-goto-pw" style="width:100%">🔑 Go to Password Change</button>
             <div style="font-size:11px;color:#8a8a9a;margin-top:10px;line-height:1.5">Logged in as <span style="color:#c9a052">${esc((USER&&USER.email)||'')}</span></div>
           </div>
         </div>`;
       $('ea-save-set').onclick=saveSettings;
-      $('ea-change-pw').onclick=changePw;
+      $('ea-goto-pw').onclick=function(){ navigate('password'); };
     }catch(e){
       /* Graceful fallback: show the form with defaults even if settings table is missing or misconfigured */
       $('ea-content').innerHTML=`
@@ -5155,12 +5229,12 @@ window.addEventListener('scroll',function(){var btn=document.getElementById('bac
             <div class="ea-fg"><label class="ea-tog-l">TikTok URL</label><input id="ea-set-tt" class="ea-input" value=""></div>
           </div>
           <div class="ea-sset"><h3>🔐 Account</h3>
-            <div class="ea-fg"><label class="ea-tog-l">New Password</label><input id="ea-set-pw" class="ea-input" type="password" placeholder="New password (min 6 chars)"></div>
-            <button class="ea-tbtn ghost" id="ea-change-pw" style="width:100%;margin-top:6px">Change Password</button>
+            <div style="font-size:12.5px;color:#9a9aaa;line-height:1.6;margin-bottom:10px">Use the dedicated <b style="color:#c9a052">Password Change</b> page to change your password — it verifies your current password first.</div>
+            <button class="ea-tbtn ghost" id="ea-goto-pw" style="width:100%">🔑 Go to Password Change</button>
           </div>
         </div>`;
       $('ea-save-set').onclick=saveSettings;
-      $('ea-change-pw').onclick=changePw;
+      $('ea-goto-pw').onclick=function(){ navigate('password'); };
     }
   }
   async function saveSettings(){
@@ -5173,11 +5247,6 @@ window.addEventListener('scroll',function(){var btn=document.getElementById('bac
       if(r.error) throw r.error;
       toast('Settings saved! SDG.','success');
     }catch(e){ toast(e.message,'error'); }
-  }
-  async function changePw(){
-    var pw=v('ea-set-pw');
-    if(pw.length<6){ toast('Password must be at least 6 characters.','error'); return; }
-    try{ var r=await getSupa().auth.updateUser({password:pw}); if(r.error) throw r.error; toast('Password updated!','success'); $('ea-set-pw').value=''; }catch(e){ toast(e.message,'error'); }
   }
 
   // expose for inline onchange handlers
