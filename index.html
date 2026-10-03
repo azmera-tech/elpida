@@ -5173,6 +5173,11 @@ window.addEventListener('scroll',function(){var btn=document.getElementById('bac
     setActions('<button class="ea-tbtn primary" id="ea-save-set">Save Settings</button>');
     try{
       var r=await sbSelect('settings',{order:{col:'key',asc:true},limit:200});
+      // The admin may have navigated to a different tab while this was loading (e.g. the new
+      // Password Change tab, which clears #ea-top-actions on render) — if so, this response is
+      // stale: stop here instead of overwriting that tab's DOM and crashing on a button that no
+      // longer exists. SECTION is set synchronously by navigate() before it calls this function.
+      if(SECTION!=='settings') return;
       var s={}; r.data.forEach(function(x){ s[x.key]=x.value; });
       $('ea-content').innerHTML=`
         <div class="ea-shead"><h2>Site Settings</h2><p>Configure your ELPIDA website.</p></div>
@@ -5201,6 +5206,7 @@ window.addEventListener('scroll',function(){var btn=document.getElementById('bac
       $('ea-save-set').onclick=saveSettings;
       $('ea-goto-pw').onclick=function(){ navigate('password'); };
     }catch(e){
+      if(SECTION!=='settings') return; // same stale-navigation guard as the try branch above
       /* Graceful fallback: show the form with defaults even if settings table is missing or misconfigured */
       $('ea-content').innerHTML=`
         <div class="ea-apierr" style="margin-bottom:18px">
